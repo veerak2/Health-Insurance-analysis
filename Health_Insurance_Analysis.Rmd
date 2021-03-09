@@ -1,0 +1,296 @@
+---
+title: "Health Insurance analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(glue)
+```
+
+```{r}
+df <- read_xlsx("C:/College/Courses/SDM/Assignments/Health Insurance/Health-Insurance-analysis/HealthInsurance.xlsx", sheet = "Data")
+```
+
+### Data Exploration
+
+```{r}
+dft <- df
+```
+
+```{r}
+dft
+```
+
+
+Converting the binary columns to factors using list apply
+
+```{r}
+names <-c('healthins','female','lowincome','firmlocation','private','married','poverty','midincome','msa','prioritylist','vgh','fph','blackhisp','hisp','black')
+dft[,names] <- lapply(dft[,names],factor)
+```
+
+
+```{r}
+summary(dft)
+```
+We only have people who are aged above 65.
+
+Combining multiple binary columns to one categorical column
+ 
+ "Why write more code when less code do work" - Kavin, 2021
+
+
+```{r}
+colSums((is.na(dft)))
+```
+
+```{r}
+status_function <- function(status){
+  if(nchar(status) > 1){
+    if(status == "good"){
+    val <- "good"
+    }
+    else if(status == "verygood"){
+    val <- "verygood"
+    }
+    else if(status == "fair"){
+    val <- "fair"
+    }
+    else if(status == "poor"){
+    val <- "poor"
+    }
+    else{
+    val <- "unknown"
+    }
+    return(val)
+  }
+}
+
+```
+
+```{r}
+names <- c('verygood','good','fair','poor')
+dft$status <- dft[,names] %>%  apply( 1, function(x) names(x)[as.logical(x)])
+dft$status <- lapply(dft$status, function(x) ifelse(identical(x, character(0)), "unknown", x))
+dft$status <-  as.factor(unlist(lapply(dft$status,FUN = status_function)))
+```
+
+filtering out ssi ratio > 1
+```{r}
+dft <- dft %>% filter(ssiratio < 1)
+```
+
+There is discrepancy in the data. It shows people with no health insurance have private insurance. 
+
+Keeping this data as we dont know which one is true. We will just include one or the other in the models.
+
+```{r}
+dft %>% filter(healthins == 0 & private == 1) %>% count()
+```
+```{r}
+dft %>% filter(status == "unknown") %>% count()
+```
+
+```{r}
+df <- subset(dft,select = -c(verygood,good,fair,poor,firmlocation,firmsize,black,hisp,married,educyr,poverty,midincome,msa,prioritylist,vgh,fph))
+```
+
+### EDA
+
+Distribution of Dependent variable: Medical expense
+
+```{r}
+hist(df$medexpense)
+hist(df$logmedexpense)
+```
+```{r}
+hist(df$income)
+hist(df$logincome)
+```
+
+How important is having health insurance?
+
+```{r}
+df %>% 
+  add_count(healthins,name={"total"}) %>% 
+  mutate(healthins = glue("{healthins}({total})"),       
+         fct_reorder(healthins,medexpense)) %>% 
+  ggplot(aes(x = healthins,y=logmedexpense)) +
+    geom_boxplot() 
+```
+
+```{r}
+ggplot() +
+  aes(x = df$logmedexpense, y = df$logincome,color = df$blackhisp) +
+  geom_point() + geom_smooth(method = "lm", se=FALSE) + labs(color = "Black or hisp")
+```
+Does health status matter?
+
+```{r}
+df %>% 
+  add_count(status,name={"total"}) %>% 
+  mutate(status = glue("{status}({total})"),       
+         fct_reorder(status,medexpense)) %>% 
+  ggplot(aes(x = status,y=medexpense)) +
+    geom_boxplot() 
+```
+```{r}
+df %>% 
+  ggplot(aes(logmedexpense,fill = status)) +
+    geom_density(alpha = 0.5) 
+```
+
+```{r}
+df %>% 
+  add_count(private,name={"total"}) %>% 
+  mutate(private = glue("{private}({total})"),       
+         fct_reorder(private,medexpense)) %>% 
+  ggplot(aes(x = private,y=logmedexpense)) +
+    geom_boxplot() 
+```
+```{r}
+df %>% 
+  add_count(blackhisp,name={"total"}) %>% 
+  mutate(blackhisp = glue("{blackhisp}({total})"),       
+         fct_reorder(blackhisp,medexpense)) %>% 
+  ggplot(aes(x = blackhisp,y=logmedexpense)) +
+    geom_boxplot() 
+```
+```{r}
+df %>% 
+  add_count(female,name={"total"}) %>% 
+  mutate(female = glue("{female}({total})"),       
+         fct_reorder(female,medexpense)) %>% 
+  ggplot(aes(x = female,y=logmedexpense)) +
+    geom_boxplot() 
+```
+```{r}
+df %>% 
+  ggplot(aes(illnesses, y = medexpense), ) +
+  geom_point() + geom_smooth()
+```
+
+```{r}
+df %>% 
+  ggplot(aes(logincome, y = logmedexpense)) +
+  geom_point() + xlim(0,6) + geom_smooth()
+```
+
+```{r}
+df %>% filter(ssiratio < 1) %>% 
+  filter(ssiratio < 0.5) %>% select(medexpense) %>% summarise(median(medexpense))
+```
+Having medical expense based on firm size
+
+```{r}
+dft %>% filter(firmsize > 0) %>% 
+  summary()
+```
+
+
+```{r}
+df %>% filter(ssiratio < 1) %>% 
+  ggplot(aes(ssiratio, y = medexpense)) +
+  geom_point() + geom_smooth()
+```
+```{r}
+nums <- unlist(lapply(df, is.numeric))
+PerformanceAnalytics::chart.Correlation(df[,nums])
+```
+
+
+```{r}
+ols_model1 <- lm(logmedexpense ~ healthins + private + female + blackhisp + income + status + agesqrd + illnesses,data=df)
+summary(ols_model1)
+plot(ols_model1)
+summary(ols_model1, cor=T)   
+hist(ols_model1$residuals)
+hist(ols_model1$fitted.values)
+
+print("Normality - KS test : ") # since sample greather than 2000
+norm <- rnorm(8407)
+ks.test(norm, ols_model1$res)  
+print("Bartlett's test : ") 
+bartlett.test(list(ols_model1$residuals,ols_model1$fitted.values))
+print("Durbin-Watson's test : ") 
+lmtest::dwtest(ols_model1)
+car::vif(ols_model1)
+```
+
+The ols model fails to pass the assummptions. Hence the estimates cannot be replied upon. To be specific, it fails the homoscedastic and independene tests.
+
+
+
+Trying with weighted least squares as we can see in the residual vs fitted plot, there is fanning inwards for higher values
+```{r}
+wt = 1/ols_model1$fitted.values^2
+wls <- lm(logmedexpense ~ healthins + private + female + blackhisp + income + status + agesqrd + illnesses,data=df,weights = wt)
+summary(wls)
+plot(wls)
+hist(wls$residuals)
+hist(wls$fitted.values)
+
+print("Normality - KS test : ") # since sample greather than 2000
+norm <- rnorm(8407)
+ks.test(norm, wls$res)  
+print("Bartlett's test : ") 
+bartlett.test(list(wls$residuals,wls$fitted.values))
+print("Durbin-Watson's test : ") 
+lmtest::dwtest(ols_model1)
+car::vif(wls)
+```
+
+
+
+```{r}
+ols_model2 <- lm(logmedexpense ~ private + female + blackhisp + ssiratio + illnesses + agesqrd ,data=df)
+summary(ols_model2)
+plot(ols_model2)
+summary(ols_model2, cor=T)   
+```
+
+```{r}
+
+ols_model1 %>% vcov %>% diag() %>% sqrt() %>% round(3)
+```
+
+```{r}
+stargazer::stargazer(ols_model1,wls,ols_model2, title="Results", type = "text")
+```
+Inferences made from the best model which is the weighted model:
+
+•	Do people with health insurance have higher or lower medical expense than people without health insurance, when other variables are controlled? By how much? Why do you think this happens?
+The marginal effect of health insurance suggests that people with health insurance will likely pay 10% more than people without health insurances on medical expenses ie while keeping all other variables constant. This could be possible because insurances do not cover everything like long-term care, dental, eye exams etc, even medicare does not cover these.
+
+•	Do people with private insurance pay more or less than people with public insurance? By how much?
+The marginal effect of private insurance suggests that people with private insurance spend 1% lesser than people with public insurance while keeping all other variables constant.
+
+•	Do people with more illnesses have higher or lower medical expense than people with less illnesses? By how much?
+The marginal effect of illnesses suggests that if the number of illnesses increases by 1 then medical expense would go up by 52% keeping all other variables constant.
+
+•	Do males have higher medical expense than females? By how much?
+The marginal effect of females suggests that females spend 5% more on medical expenses than males while keeping all other variables constant. 
+
+•	Do older people have higher medical expense than younger people? By how much?
+The dataset does not have information on younger people.
+
+•	Do minority groups (Blacks/Hispanics) have higher or lower medical expenses than the non-minority population? By how much?
+The marginal effect of blackhisp suggests that minority groups (Blacks/Hispanics) spend 18% less on medical expenses than non-minority groups while keeping all other variables constant. 
+
+•	How do people’s income level relate to their medical expense, when controlled for other factors? By how much?
+The marginal effect of income suggests that if annual income increases by $1000 then medical expenses would go up by 0.1% keeping all other variables constant
+
+
